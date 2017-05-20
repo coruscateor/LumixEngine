@@ -267,9 +267,9 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 	{
 		const Controller& controller = m_controllers[{cmp.index}];
 		Anim::InputDecl& decl = controller.resource->m_input_decl;
-		for (int i = 0; i < decl.inputs_count; ++i)
+		for (int i = 0; i < lengthOf(decl.inputs); ++i)
 		{
-			if (equalStrings(decl.inputs[i].name, name)) return i;
+			if (decl.inputs[i].type != Anim::InputDecl::EMPTY && equalStrings(decl.inputs[i].name, name)) return i;
 		}
 		return -1;
 	}
@@ -284,7 +284,7 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 			return;
 		}
 		Anim::InputDecl& decl = controller.resource->m_input_decl;
-		if (input_idx < 0 || input_idx >= decl.inputs_count) return;
+		if (input_idx < 0 || input_idx >= lengthOf(decl.inputs)) return;
 		if (decl.inputs[input_idx].type == Anim::InputDecl::FLOAT)
 		{
 			*(float*)&controller.input[decl.inputs[input_idx].offset] = value;
@@ -474,6 +474,7 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 		serializer.write(m_controllers.size());
 		for (const Controller& controller : m_controllers)
 		{
+			serializer.write(controller.default_set);
 			serializer.write(controller.entity);
 			serializer.writeString(controller.resource ? controller.resource->getPath().c_str() : "");
 		}
@@ -513,6 +514,7 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 		for (int i = 0; i < count; ++i)
 		{
 			Controller controller(m_anim_system.m_allocator);
+			serializer.read(controller.default_set);
 			serializer.read(controller.entity);
 			char tmp[MAX_PATH_LENGTH];
 			serializer.readString(tmp, lengthOf(tmp));
@@ -634,7 +636,7 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 		Controller& ctrl = m_controllers.get({ cmp.index });
 		Anim::InputDecl& decl = ctrl.resource->m_input_decl;
 		if (!ctrl.root) return;
-		if (input_idx >= decl.inputs_count) return;
+		if (input_idx >= lengthOf(decl.inputs)) return;
 		if (decl.inputs[input_idx].type != Anim::InputDecl::FLOAT) return;
 		*(float*)&ctrl.input[decl.inputs[input_idx].offset] = value;
 	}
@@ -645,7 +647,7 @@ struct AnimationSceneImpl LUMIX_FINAL : public AnimationScene
 		Controller& ctrl = m_controllers.get({ cmp.index });
 		Anim::InputDecl& decl = ctrl.resource->m_input_decl;
 		if (!ctrl.root) return;
-		if (input_idx >= decl.inputs_count) return;
+		if (input_idx >= lengthOf(decl.inputs)) return;
 		if (decl.inputs[input_idx].type != Anim::InputDecl::BOOL) return;
 		*(bool*)&ctrl.input[decl.inputs[input_idx].offset] = value;
 	}

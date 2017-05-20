@@ -838,6 +838,9 @@ public:
 
 	void serializeDecal(ISerializer& serializer, ComponentHandle cmp)
 	{
+		const Decal& decal = m_decals[{cmp.index}];
+		serializer.write("scale", decal.scale);
+		serializer.write("material", decal.material ? decal.material->getPath().c_str() : "");
 	}
 
 
@@ -2909,7 +2912,7 @@ public:
 			Lumix::g_log_error.log("render_test") << "Failed to open " << path_preimage;
 			return 0xffffFFFF;
 		}
-		unsigned int result = Lumix::Texture::compareTGA(scene->m_allocator, file1, file2, min_diff);
+		unsigned int result = Lumix::Texture::compareTGA(file1, file2, min_diff, scene->m_allocator);
 		fs.close(*file1);
 		fs.close(*file2);
 		return result;

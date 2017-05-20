@@ -84,6 +84,14 @@ int PushStyleVar(lua_State* L)
 }
 
 
+int PushID(lua_State* L)
+{
+	int id = LuaWrapper::checkArg<int>(L, 1);
+	ImGui::PushID(id);
+	return 0;
+}
+
+
 int SetStyleColor(lua_State* L)
 {
 	auto& style = ImGui::GetStyle();
@@ -917,8 +925,10 @@ public:
 		LuaImGui::registerCFunction(m_state, "IsMouseDown", &LuaWrapper::wrap<decltype(&LuaImGui::IsMouseDown), &LuaImGui::IsMouseDown>);
 		LuaImGui::registerCFunction(m_state, "OpenPopup", &LuaWrapper::wrap<decltype(&ImGui::OpenPopup), &ImGui::OpenPopup>);
 		LuaImGui::registerCFunction(m_state, "PopItemWidth", &LuaWrapper::wrap<decltype(&ImGui::PopItemWidth), &ImGui::PopItemWidth>);
+		LuaImGui::registerCFunction(m_state, "PopID", &LuaWrapper::wrap<decltype(&ImGui::PopID), &ImGui::PopID>);
 		LuaImGui::registerCFunction(m_state, "PopStyleVar", &LuaWrapper::wrap<decltype(&ImGui::PopStyleVar), &ImGui::PopStyleVar>);
 		LuaImGui::registerCFunction(m_state, "PushItemWidth", &LuaWrapper::wrap<decltype(&ImGui::PushItemWidth), &ImGui::PushItemWidth>);
+		LuaImGui::registerCFunction(m_state, "PushID", &LuaImGui::PushID);
 		LuaImGui::registerCFunction(m_state, "PushStyleVar", &LuaImGui::PushStyleVar);
 		LuaImGui::registerCFunction(m_state, "Rect", &LuaWrapper::wrap<decltype(&LuaImGui::Rect), &LuaImGui::Rect>);
 		LuaImGui::registerCFunction(m_state, "SameLine", &LuaImGui::SameLine);
@@ -1386,15 +1396,9 @@ public:
 			g_log_error.log("Editor") << "Prefab " << prefab->getPath().c_str() << " is not ready, preload it.";
 			return 0;
 		}
-		Array<Entity> entities(engine->m_lifo_allocator);
-		universe->instantiatePrefab(*prefab, position, { 0, 0, 0, 1 }, 1, entities);
+		Entity entity = universe->instantiatePrefab(*prefab, position, {0, 0, 0, 1}, 1);
 
-		lua_createtable(L, entities.size(), 0);
-		for (int i = 0; i < entities.size(); ++i)
-		{
-			LuaWrapper::push(L, entities[i]);
-			lua_rawseti(L, -2, i + 1);
-		}
+		LuaWrapper::push(L, entity);
 		return 1;
 	}
 

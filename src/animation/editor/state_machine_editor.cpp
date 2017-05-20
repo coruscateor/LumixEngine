@@ -60,19 +60,19 @@ static int autocompleteCallback(ImGuiTextEditCallbackData *data)
 	copyNString(tmp, lengthOf(tmp), data->Buf + start_word, data->CursorPos - start_word);
 
 	const auto& input_decl = controller->getEngineResource()->m_input_decl;
-	for (int i = 0; i < input_decl.inputs_count; ++i)
+	for (const auto& input : input_decl.inputs)
 	{
-		if (startsWith(input_decl.inputs[i].name, tmp))
+		if (input.type == Anim::InputDecl::EMPTY && startsWith(input.name, tmp))
 		{
-			data->InsertChars(data->CursorPos, input_decl.inputs[i].name + stringLength(tmp));
+			data->InsertChars(data->CursorPos, input.name + stringLength(tmp));
 			return 0;
 		}
 	}
-	for (int i = 0; i < input_decl.constants_count; ++i)
+	for (const auto& constant : input_decl.constants)
 	{
-		if (startsWith(input_decl.constants[i].name, tmp))
+		if (constant.type != Anim::InputDecl::EMPTY && startsWith(constant.name, tmp))
 		{
-			data->InsertChars(data->CursorPos, input_decl.constants[i].name + stringLength(tmp));
+			data->InsertChars(data->CursorPos, constant.name + stringLength(tmp));
 			return 0;
 		}
 	}
@@ -354,6 +354,35 @@ void Container::removeChild(Component* component)
 }
 
 
+void Container::createEdge(int from_uid, int to_uid, int edge_uid)
+{
+	auto* engine_parent = ((Anim::Container*)engine_cmp);
+	// TODO different kind of edges
+	auto* engine_edge = LUMIX_NEW(m_allocator, Anim::Edge)(m_allocator);
+	engine_edge->uid = edge_uid;
+	engine_edge->from = (Anim::Node*)getByUID(from_uid)->engine_cmp;
+	engine_edge->to = (Anim::Node*)getByUID(to_uid)->engine_cmp;
+	engine_parent->children.push(engine_edge);
+
+	auto* edge = LUMIX_NEW(m_allocator, Edge)(engine_edge, this, m_controller);
+	m_editor_cmps.push(edge);
+	m_selected_component = edge;
+}
+
+
+void Container::createNode(Anim::Node::Type type, int uid, const ImVec2& pos)
+{
+
+}
+
+
+void Container::destroyChild(int child_uid)
+{
+	auto* child = getByUID(child_uid);
+	LUMIX_DELETE(m_allocator, child);
+}
+
+
 Component* Container::childrenHitTest(const ImVec2& pos)
 {
 	for (auto* i : m_editor_cmps)
@@ -621,7 +650,7 @@ void Blend1DNode::debugInside(ImDrawList* draw,
 
 void Blend1DNode::dropSlot(const char* name, u32 slot, const ImVec2& canvas_screen_pos)
 {
-	createState(Anim::Component::SIMPLE_ANIMATION, ImGui::GetMousePos() - canvas_screen_pos);
+	createNode(Anim::Component::SIMPLE_ANIMATION, m_controller.createUID(), ImGui::GetMousePos() - canvas_screen_pos);
 	auto* node = (AnimationNode*)m_selected_component;
 	node->name = name;
 	auto* engine_node = (Anim::AnimationNode*)node->engine_cmp;
@@ -676,9 +705,9 @@ void Blend1DNode::deserialize(Lumix::InputBlob& blob)
 	auto& input_decl = m_controller.getEngineResource()->m_input_decl;
 	m_input = -1;
 	int offset = ((Anim::Blend1DNode*)engine_cmp)->input_offset;
-	for (int i = 0; i < input_decl.inputs_count; ++i)
+	for (int i = 0; i < lengthOf(input_decl.inputs); ++i)
 	{
-		if (input_decl.inputs[i].offset == offset)
+		if (input_decl.inputs[i].type != Anim::InputDecl::EMPTY && input_decl.inputs[i].offset == offset)
 		{
 			m_input = i;
 			break;
@@ -687,13 +716,13 @@ void Blend1DNode::deserialize(Lumix::InputBlob& blob)
 }
 
 
-void Blend1DNode::createState(Lumix::Anim::Component::Type type, const ImVec2& pos)
+void Blend1DNode::createNode(Lumix::Anim::Component::Type type, int uid, const ImVec2& pos)
 {
 	auto* cmp = (Node*)createComponent(Anim::createComponent(type, m_allocator), this, m_controller);
 	cmp->pos = pos;
 	cmp->size.x = 100;
 	cmp->size.y = 30;
-	cmp->engine_cmp->uid = m_controller.createUID();
+	cmp->engine_cmp->uid = uid;
 	m_editor_cmps.push(cmp);
 	((Anim::Blend1DNode*)engine_cmp)->children.push(cmp->engine_cmp);
 	m_selected_component = cmp;
@@ -806,14 +835,15 @@ void Blend1DNode::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 		draw->AddLine(canvas_screen_pos + m_drag_source->pos + m_drag_source->size * 0.5f, ImGui::GetMousePos(), 0xfff00FFF);
 	}
 
+	auto& editor = m_controller.getEditor();
 	if (ImGui::BeginPopup("context_menu"))
 	{
 		ImVec2 pos_on_canvas = ImGui::GetMousePos() - canvas_screen_pos;
 		if (ImGui::BeginMenu("Create"))
 		{
-			if (ImGui::MenuItem("Simple")) createState(Anim::Component::SIMPLE_ANIMATION, pos_on_canvas);
-			if (ImGui::MenuItem("State machine")) createState(Anim::Component::STATE_MACHINE, pos_on_canvas);
-			if (ImGui::MenuItem("Blend 1D")) createState(Anim::Component::BLEND1D, pos_on_canvas);
+			if (ImGui::MenuItem("Simple")) editor.createNode(m_controller, this, Anim::Component::SIMPLE_ANIMATION, pos_on_canvas);
+			if (ImGui::MenuItem("State machine")) editor.createNode(m_controller, this, Anim::Component::STATE_MACHINE, pos_on_canvas);
+			if (ImGui::MenuItem("Blend 1D")) editor.createNode(m_controller, this, Anim::Component::BLEND1D, pos_on_canvas);
 			ImGui::EndMenu();
 		}
 		if (m_context_cmp && m_context_cmp != m_root_node)
@@ -877,10 +907,14 @@ void Blend1DNode::onGUI()
 	Anim::InputDecl& decl = m_controller.getEngineResource()->m_input_decl;
 	auto input_getter = [](void* data, int idx, const char** out) -> bool {
 		auto& decl = *(Anim::InputDecl*)data;
-		*out = decl.inputs[idx].name;
+		int input_idx = decl.inputFromLinearIdx(idx);
+		const auto& input = decl.inputs[input_idx];
+		*out = input.name;
 		return true;
 	};
-	ImGui::Combo("Input", &m_input, input_getter, &decl, decl.inputs_count);
+	int linear = decl.inputToLinearIdx(m_input);
+	ImGui::Combo("Input", &linear, input_getter, &decl, decl.inputs_count);
+	m_input = decl.inputFromLinearIdx(linear);
 }
 
 
@@ -896,9 +930,9 @@ void AnimationNode::deserialize(Lumix::InputBlob& blob)
 	auto& input_decl = m_controller.getEngineResource()->m_input_decl;
 	root_rotation_input = -1;
 	int offset = ((Anim::AnimationNode*)engine_cmp)->root_rotation_input_offset;
-	for (int i = 0; i < input_decl.inputs_count; ++i)
+	for (int i = 0; i < lengthOf(input_decl.inputs); ++i)
 	{
-		if (input_decl.inputs[i].offset == offset)
+		if (input_decl.inputs[i].type != Anim::InputDecl::EMPTY && input_decl.inputs[i].offset == offset)
 		{
 			root_rotation_input = i;
 			break;
@@ -977,16 +1011,24 @@ void AnimationNode::onGUI()
 		if (idx >= decl.inputs_count)
 		{
 			*out = "No root motion rotation";
+			return true;
+		}
+		int input_idx = decl.inputFromLinearIdx(idx);
+		const auto& input = decl.inputs[input_idx];
+		*out = input.name;
+		return true;
+	};
+	int linear = decl.inputToLinearIdx(root_rotation_input);
+	if (ImGui::Combo("Root rotation input", &linear, input_getter, &decl, decl.inputs_count + 1))
+	{
+		if (linear >= decl.inputs_count)
+		{
+			root_rotation_input = -1;
 		}
 		else
 		{
-			*out = decl.inputs[idx].name;
+			root_rotation_input = decl.inputFromLinearIdx(linear);
 		}
-		return true;
-	};
-	if (ImGui::Combo("Root rotation input", &root_rotation_input, input_getter, &decl, decl.inputs_count + 1))
-	{
-		if (root_rotation_input >= decl.inputs_count) root_rotation_input = -1;
 	}
 	if (root_rotation_input != -1)
 	{
@@ -1159,6 +1201,18 @@ void Container::deserialize(InputBlob& blob)
 }
 
 
+Component* Container::getByUID(int uid)
+{
+	if (uid == engine_cmp->uid) return this;
+	for (Component* cmp : m_editor_cmps)
+	{
+		Component* x = cmp->getByUID(uid);
+		if (x) return x;
+	}
+	return nullptr;
+}
+
+
 void Container::compile()
 {
 	Node::compile();
@@ -1181,13 +1235,13 @@ void Container::serialize(OutputBlob& blob)
 }
 
 
-void StateMachine::createState(Anim::Component::Type type, const ImVec2& pos)
+void StateMachine::createNode(Anim::Component::Type type, int uid, const ImVec2& pos)
 {
 	auto* cmp = (Node*)createComponent(Anim::createComponent(type, m_allocator), this, m_controller);
 	cmp->pos = pos;
 	cmp->size.x = 100;
 	cmp->size.y = 30;
-	cmp->engine_cmp->uid = m_controller.createUID();
+	cmp->engine_cmp->uid = uid;
 	m_editor_cmps.push(cmp);
 	((Anim::StateMachine*)engine_cmp)->children.push(cmp->engine_cmp);
 	m_selected_component = cmp;
@@ -1307,6 +1361,7 @@ void StateMachine::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 
 	if (m_mouse_status == DRAG_NODE && !m_drag_source) m_mouse_status = NONE;
 
+	auto& editor = m_controller.getEditor();
 	if (ImGui::IsMouseReleased(1))
 	{
 		Component* hit_cmp = childrenHitTest(ImGui::GetMousePos() - canvas_screen_pos);
@@ -1326,16 +1381,7 @@ void StateMachine::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 					}
 					else
 					{
-						auto* engine_parent = ((Anim::Container*)engine_cmp);
-						auto* engine_edge = LUMIX_NEW(m_allocator, Anim::Edge)(m_allocator);
-						engine_edge->uid = m_controller.createUID();
-						engine_edge->from = (Anim::Node*)m_drag_source->engine_cmp;
-						engine_edge->to = (Anim::Node*)hit_cmp->engine_cmp;
-						engine_parent->children.push(engine_edge);
-
-						auto* edge = LUMIX_NEW(m_allocator, Edge)(engine_edge, this, m_controller);
-						m_editor_cmps.push(edge);
-						m_selected_component = edge;
+						editor.createEdge(m_controller, this, m_drag_source, (Node*)hit_cmp);
 					}
 				}
 			}
@@ -1348,10 +1394,10 @@ void StateMachine::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 		}
 	}
 
-
 	if (m_mouse_status == DRAG_NODE)
 	{
-		m_drag_source->pos = m_drag_source->pos + ImGui::GetIO().MouseDelta;
+		ImVec2 new_pos = m_drag_source->pos + ImGui::GetIO().MouseDelta;
+		editor.moveNode(m_controller, m_drag_source, new_pos);
 	}
 
 	if (ImGui::IsMouseReleased(0) || ImGui::IsMouseReleased(1)) m_mouse_status = NONE;
@@ -1366,9 +1412,9 @@ void StateMachine::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 		ImVec2 pos_on_canvas = ImGui::GetMousePos() - canvas_screen_pos;
 		if (ImGui::BeginMenu("Create"))
 		{
-			if (ImGui::MenuItem("Simple")) createState(Anim::Component::SIMPLE_ANIMATION, pos_on_canvas);
-			if (ImGui::MenuItem("State machine")) createState(Anim::Component::STATE_MACHINE, pos_on_canvas);
-			if (ImGui::MenuItem("Blend 1D")) createState(Anim::Component::BLEND1D, pos_on_canvas);
+			if (ImGui::MenuItem("Simple")) editor.createNode(m_controller, this, Anim::Component::SIMPLE_ANIMATION, pos_on_canvas);
+			if (ImGui::MenuItem("State machine")) editor.createNode(m_controller, this, Anim::Component::STATE_MACHINE, pos_on_canvas);
+			if (ImGui::MenuItem("Blend 1D")) editor.createNode(m_controller, this, Anim::Component::BLEND1D, pos_on_canvas);
 			ImGui::EndMenu();
 		}
 		if (m_context_cmp && m_context_cmp != m_entry_node)
@@ -1388,7 +1434,7 @@ void StateMachine::drawInside(ImDrawList* draw, const ImVec2& canvas_screen_pos)
 
 void StateMachine::dropSlot(const char* name, u32 slot, const ImVec2& canvas_screen_pos)
 {
-	createState(Anim::Component::SIMPLE_ANIMATION, ImGui::GetMousePos() - canvas_screen_pos);
+	createNode(Anim::Component::SIMPLE_ANIMATION, m_controller.createUID(), ImGui::GetMousePos() - canvas_screen_pos);
 	auto* node = (AnimationNode*)m_selected_component;
 	node->name = name;
 	auto* engine_node = (Anim::AnimationNode*)node->engine_cmp;
@@ -1396,14 +1442,12 @@ void StateMachine::dropSlot(const char* name, u32 slot, const ImVec2& canvas_scr
 }
 
 
-ControllerResource::ControllerResource(Lumix::AnimationSystem& anim_system,
-	IAnimationEditor& editor,
+ControllerResource::ControllerResource(IAnimationEditor& editor,
 	ResourceManagerBase& manager,
 	IAllocator& allocator)
 	: m_animation_slots(allocator)
 	, m_allocator(allocator)
 	, m_editor(editor)
-	, m_animation_system(anim_system)
 {
 	m_engine_resource = LUMIX_NEW(allocator, Anim::ControllerResource)(Path("editor"), manager, allocator);
 	auto* engine_root = LUMIX_NEW(allocator, Anim::StateMachine)(allocator);
@@ -1481,6 +1525,14 @@ void ControllerResource::createAnimSlot(const char* name, const char* path)
 	auto* manager = m_engine_resource->getResourceManager().getOwner().get(ANIMATION_TYPE);
 	auto* anim = (Animation*)manager->load(Path(path));
 	m_engine_resource->addAnimation(0, crc32(name), anim);
+}
+
+
+
+Component* ControllerResource::getByUID(int uid)
+{
+	if (m_root->engine_cmp->uid == uid) return m_root;
+	return m_root->getByUID(uid);
 }
 
 

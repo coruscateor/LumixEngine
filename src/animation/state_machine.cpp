@@ -583,7 +583,10 @@ void StateMachineInstance::onAnimationSetUpdated(AnimSet& anim_set)
 
 ComponentInstance* StateMachineInstance::update(RunningContext& rc, bool check_edges)
 {
+	float old_time = time;
+	time += rc.time_delta;
 	if (current) current = current->update(rc, true);
+	queueEvents(rc, old_time, time, 0);
 	return check_edges ? checkOutEdges(source, rc) : this;
 }
 
@@ -596,6 +599,7 @@ void StateMachineInstance::fillPose(Engine& engine, Pose& pose, Model& model, fl
 
 void StateMachineInstance::enter(RunningContext& rc, ComponentInstance* from)
 {
+	time = 0;
 	auto& source_sm = (StateMachine&)source;
 	for (auto& entry : source_sm.entries)
 	{
@@ -684,6 +688,18 @@ Component* Container::getChildByUID(int uid)
 	for (auto* child : children)
 	{
 		if (child->uid == uid) return child;
+	}
+	return nullptr;
+}
+
+
+Component* Container::getByUID(int _uid)
+{
+	if (uid == _uid) return this;
+	for (auto* child : children)
+	{
+		Component* cmp = child->getByUID(_uid);
+		if (cmp) return cmp;
 	}
 	return nullptr;
 }

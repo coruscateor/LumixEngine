@@ -6,6 +6,7 @@
 #include "animation/events.h"
 #include "animation/state_machine.h"
 #include "editor/asset_browser.h"
+#include "editor/ieditor_command.h"
 #include "editor/platform_interface.h"
 #include "editor/property_grid.h"
 #include "editor/utils.h"
@@ -28,6 +29,7 @@ static ImVec2 operator+(const ImVec2& lhs, const ImVec2& rhs) { return ImVec2(lh
 
 using namespace Lumix;
 
+
 static const ComponentType ANIMABLE_HASH = PropertyRegister::getComponentType("animable");
 static const ComponentType CONTROLLER_TYPE = PropertyRegister::getComponentType("anim_controller");
 static const ResourceType ANIMATION_TYPE("animation");
@@ -36,6 +38,176 @@ static const ResourceType CONTROLLER_RESOURCE_TYPE("anim_controller");
 
 namespace AnimEditor
 {
+
+
+struct MoveAnimNodeCommand : public IEditorCommand
+{
+	MoveAnimNodeCommand(ControllerResource& controller, Node* node, const ImVec2& pos)
+		: m_controller(controller)
+		, m_node_uid(node->engine_cmp->uid)
+		, m_new_pos(pos)
+		, m_old_pos(node->pos)
+	{
+	}
+
+
+	bool execute() override
+	{
+		auto* node = (Node*)m_controller.getByUID(m_node_uid);
+		node->pos = m_new_pos;
+		return true;
+	}
+
+
+	void undo() override
+	{
+		auto* node = (Node*)m_controller.getByUID(m_node_uid);
+		node->pos = m_old_pos;
+	}
+
+
+	const char* getType() override { return "move_anim_node"; }
+
+
+	bool merge(IEditorCommand& command) override
+	{ 
+		auto& cmd = (MoveAnimNodeCommand&)command;
+		if (m_node_uid != cmd.m_node_uid || &cmd.m_controller != &m_controller) return false;
+		cmd.m_new_pos = m_new_pos;
+		return true;
+	}
+
+
+	void serialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+
+	void deserialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+	ControllerResource& m_controller;
+	int m_node_uid;
+	ImVec2 m_new_pos;
+	ImVec2 m_old_pos;
+};
+
+
+struct CreateAnimNodeCommand : public IEditorCommand
+{
+	CreateAnimNodeCommand(ControllerResource& controller,
+		Container* container,
+		Anim::Component::Type type,
+		const ImVec2& pos)
+		: m_controller(controller)
+		, m_node_uid(-1)
+		, m_container_uid(container->engine_cmp->uid)
+		, m_type(type)
+		, m_pos(pos)
+	{
+	}
+
+
+	bool execute() override
+	{
+		auto* container = (Container*)m_controller.getByUID(m_container_uid);
+		if (m_node_uid < 0) m_node_uid = m_controller.createUID();
+		container->createNode(m_type, m_node_uid, m_pos);
+		return true;
+	}
+
+
+	void undo() override
+	{
+		auto* container = (Container*)m_controller.getByUID(m_container_uid);
+		container->destroyChild(m_node_uid);
+	}
+
+
+	const char* getType() override { return "create_anim_node"; }
+
+
+	bool merge(IEditorCommand& command) override { return false; }
+
+
+	void serialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+
+	void deserialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+	ControllerResource& m_controller;
+	int m_container_uid;
+	int m_node_uid;
+	ImVec2 m_pos;
+	Anim::Component::Type m_type;
+};
+
+
+struct CreateAnimEdgeCommand : public IEditorCommand
+{
+	CreateAnimEdgeCommand(ControllerResource& controller, Container* container, Node* from, Node* to)
+		: m_controller(controller)
+		, m_from_uid(from->engine_cmp->uid)
+		, m_to_uid(to->engine_cmp->uid)
+		, m_edge_uid(-1)
+		, m_container_uid(container->engine_cmp->uid)
+	{
+	}
+
+	bool execute() override
+	{
+		auto* container = (Container*)m_controller.getByUID(m_container_uid);
+		if (m_edge_uid < 0) m_edge_uid = m_controller.createUID();
+		container->createEdge(m_from_uid, m_to_uid, m_edge_uid);
+		return true;
+	}
+
+
+	void undo() override
+	{
+		auto* container = (Container*)m_controller.getByUID(m_container_uid);
+		container->destroyChild(m_edge_uid);
+	}
+
+
+	const char* getType() override { return "create_anim_edge"; }
+
+
+	bool merge(IEditorCommand& command) override { return false; }
+
+
+	void serialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+
+	void deserialize(JsonSerializer& serializer) override
+	{
+		// TODO
+		ASSERT(false);
+	}
+
+	ControllerResource& m_controller;
+	int m_from_uid;
+	int m_to_uid;
+	int m_container_uid;
+	int m_edge_uid;
+};
 
 
 class AnimationEditor : public IAnimationEditor
@@ -57,6 +229,14 @@ public:
 	EventType& createEventType(const char* type) override;
 	EventType& getEventTypeByIdx(int idx) override  { return m_event_types[idx]; }
 	EventType& getEventType(u32 type) override;
+	void executeCommand(IEditorCommand& command);
+	void createEdge(ControllerResource& ctrl, Container* container, Node* from, Node* to) override;
+	void moveNode(ControllerResource& ctrl, Node* node, const ImVec2& pos) override;
+	void createNode(ControllerResource& ctrl,
+		Container* container,
+		Lumix::Anim::Node::Type type,
+		const ImVec2& pos) override;
+	bool hasFocus() override { return m_is_focused; }
 
 private:
 	void newController();
@@ -72,6 +252,8 @@ private:
 	void animationSlotsGUI();
 	void menuGUI();
 	void onSetInputGUI(u8* data, Component& component);
+	void undo();
+	void redo();
 
 private:
 	StudioApp& m_app;
@@ -82,7 +264,10 @@ private:
 	Container* m_container;
 	StaticString<MAX_PATH_LENGTH> m_path;
 	Array<EventType> m_event_types;
+	Array<IEditorCommand*> m_undo_stack;
+	int m_undo_index = -1;
 	bool m_is_playing = false;
+	bool m_is_focused = false;
 };
 
 
@@ -92,6 +277,7 @@ AnimationEditor::AnimationEditor(StudioApp& app)
 	, m_inputs_opened(false)
 	, m_offset(0, 0)
 	, m_event_types(app.getWorldEditor()->getAllocator())
+	, m_undo_stack(app.getWorldEditor()->getAllocator())
 {
 	m_path = "";
 	IAllocator& allocator = app.getWorldEditor()->getAllocator();
@@ -108,8 +294,7 @@ AnimationEditor::AnimationEditor(StudioApp& app)
 
 	Engine& engine = m_app.getWorldEditor()->getEngine();
 	auto* manager = engine.getResourceManager().get(CONTROLLER_RESOURCE_TYPE);
-	auto* anim_sys = (AnimationSystem*)engine.getPluginManager().getPlugin("animation");
-	m_resource = LUMIX_NEW(allocator, ControllerResource)(*anim_sys, *this, *manager, allocator);
+	m_resource = LUMIX_NEW(allocator, ControllerResource)(*this, *manager, allocator);
 	m_container = (Container*)m_resource->getRoot();
 
 	EventType& event_type = createEventType("set_input");
@@ -123,6 +308,63 @@ AnimationEditor::~AnimationEditor()
 {
 	IAllocator& allocator = m_app.getWorldEditor()->getAllocator();
 	LUMIX_DELETE(allocator, m_resource);
+}
+
+
+void AnimationEditor::moveNode(ControllerResource& ctrl, Node* node, const ImVec2& pos)
+{
+	IAllocator& allocator = m_app.getWorldEditor()->getAllocator();
+	auto* cmd = LUMIX_NEW(allocator, MoveAnimNodeCommand)(ctrl, node, pos);
+	executeCommand(*cmd);
+}
+
+
+void AnimationEditor::createNode(ControllerResource& ctrl,
+	Container* container,
+	Lumix::Anim::Node::Type type,
+	const ImVec2& pos)
+{
+	IAllocator& allocator = m_app.getWorldEditor()->getAllocator();
+	auto* cmd = LUMIX_NEW(allocator, CreateAnimNodeCommand)(ctrl, container, type, pos);
+	executeCommand(*cmd);
+}
+
+
+void AnimationEditor::createEdge(ControllerResource& ctrl, Container* container, Node* from, Node* to)
+{
+	IAllocator& allocator = m_app.getWorldEditor()->getAllocator();
+	auto* cmd = LUMIX_NEW(allocator, CreateAnimEdgeCommand)(ctrl, container, from, to);
+	executeCommand(*cmd);
+}
+
+
+void AnimationEditor::executeCommand(IEditorCommand& command)
+{
+	// TODO clean memory in destructor
+	IAllocator& allocator = m_app.getWorldEditor()->getAllocator();
+	while (m_undo_stack.size() > m_undo_index + 1)
+	{
+		LUMIX_DELETE(allocator, m_undo_stack.back());
+		m_undo_stack.pop();
+	}
+
+	if (!m_undo_stack.empty())
+	{
+		auto* back = m_undo_stack.back();
+		if (back->getType() == command.getType())
+		{
+			if (command.merge(*back))
+			{
+				back->execute();
+				LUMIX_DELETE(allocator, &command);
+				return;
+			}
+		}
+	}
+
+	m_undo_stack.push(&command);
+	++m_undo_index;
+	command.execute();
 }
 
 
@@ -141,12 +383,16 @@ void AnimationEditor::onSetInputGUI(u8* data, Component& component)
 	auto event = (Anim::SetInputEvent*)data;
 	auto& input_decl = component.getController().getEngineResource()->m_input_decl;
 	auto getter = [](void* data, int idx, const char** out) -> bool {
-		auto& input_decl = *(Anim::InputDecl*)data;
-		*out = input_decl.inputs[idx].name;
+		const auto& input_decl = *(Anim::InputDecl*)data;
+		int i = input_decl.inputFromLinearIdx(idx);
+		*out = input_decl.inputs[i].name;
 		return true;
 	};
-	ImGui::Combo("Input", &event->input_idx, getter, &input_decl, input_decl.inputs_count);
-	if (event->input_idx >= 0 && event->input_idx < input_decl.inputs_count)
+	int idx = input_decl.inputToLinearIdx(event->input_idx);
+	ImGui::Combo("Input", &idx, getter, &input_decl, input_decl.inputs_count);
+	event->input_idx = input_decl.inputFromLinearIdx(idx);
+
+	if (event->input_idx >= 0 && event->input_idx < lengthOf(input_decl.inputs))
 	{
 		switch (input_decl.inputs[event->input_idx].type)
 		{
@@ -247,8 +493,7 @@ void AnimationEditor::load()
 		LUMIX_DELETE(allocator, m_resource);
 		Engine& engine = m_app.getWorldEditor()->getEngine();
 		auto* manager = engine.getResourceManager().get(CONTROLLER_RESOURCE_TYPE);
-		auto* anim_sys = (AnimationSystem*)engine.getPluginManager().getPlugin("animation");
-		m_resource = LUMIX_NEW(allocator, ControllerResource)(*anim_sys, *this, *manager, allocator);
+		m_resource = LUMIX_NEW(allocator, ControllerResource)(*this, *manager, allocator);
 		m_container = (Container*)m_resource->getRoot();
 	}
 	file.close();
@@ -268,8 +513,7 @@ void AnimationEditor::newController()
 	LUMIX_DELETE(allocator, m_resource);
 	Engine& engine = m_app.getWorldEditor()->getEngine();
 	auto* manager = engine.getResourceManager().get(CONTROLLER_RESOURCE_TYPE);
-	auto* anim_sys = (AnimationSystem*)engine.getPluginManager().getPlugin("animation");
-	m_resource = LUMIX_NEW(allocator, ControllerResource)(*anim_sys, *this, *manager, allocator);
+	m_resource = LUMIX_NEW(allocator, ControllerResource)(*this, *manager, allocator);
 	m_container = (Container*)m_resource->getRoot();
 	m_path = "";
 }
@@ -302,6 +546,13 @@ void AnimationEditor::menuGUI()
 			if (ImGui::MenuItem("Open from selected entity")) loadFromEntity();
 			ImGui::EndMenu();
 		}
+		if (ImGui::BeginMenu("Edit"))
+		{
+			if (ImGui::MenuItem("Undo")) undo();
+			if (ImGui::MenuItem("Redo")) redo();
+			ImGui::EndMenu();
+		}
+
 		ImGui::SameLine();
 		ImGui::Checkbox("Play", &m_is_playing);
 		ImGui::SameLine();
@@ -312,6 +563,24 @@ void AnimationEditor::menuGUI()
 
 		ImGui::EndMenuBar();
 	}
+}
+
+
+void AnimationEditor::redo()
+{
+	if (m_undo_index == m_undo_stack.size() - 1) return;
+
+	++m_undo_index;
+	m_undo_stack[m_undo_index]->execute();
+}
+
+
+void AnimationEditor::undo()
+{
+	if (m_undo_index < 0) return;
+
+	m_undo_stack[m_undo_index]->undo();
+	--m_undo_index;
 }
 
 
@@ -331,6 +600,7 @@ void AnimationEditor::editorGUI()
 {
 	if (ImGui::BeginDock("Animation Editor", &m_editor_opened, ImGuiWindowFlags_MenuBar))
 	{
+		m_is_focused = ImGui::IsRootWindowOrAnyChildFocused();
 		menuGUI();
 		ImGui::Columns(2);
 		drawGraph();
@@ -338,6 +608,10 @@ void AnimationEditor::editorGUI()
 		ImGui::Text("Properties");
 		if(m_container->getSelectedComponent()) m_container->getSelectedComponent()->onGUI();
 		ImGui::Columns();
+	}
+	else
+	{
+		m_is_focused = false;
 	}
 	ImGui::EndDock();
 }
@@ -355,10 +629,10 @@ void AnimationEditor::inputsGUI()
 			u8* input_data = isValid(cmp) ? scene->getControllerInput(cmp) : nullptr;
 			Anim::InputDecl& input_decl = m_resource->getEngineResource()->m_input_decl;
 
-			for (int i = 0; i < input_decl.inputs_count; ++i)
+			for (auto& input : input_decl.inputs)
 			{
-				ImGui::PushID(i);
-				auto& input = input_decl.inputs[i];
+				if (input.type == Anim::InputDecl::EMPTY) continue;
+				ImGui::PushID(&input);
 				ImGui::PushItemWidth(100);
 				ImGui::InputText("##name", input.name, lengthOf(input.name));
 				ImGui::SameLine();
@@ -377,17 +651,30 @@ void AnimationEditor::inputsGUI()
 						default: ASSERT(false); break;
 					}
 				}
+				ImGui::SameLine();
+				if (ImGui::Button("x"))
+				{
+					input.type = Anim::InputDecl::EMPTY;
+					--input_decl.inputs_count;
+				}
+
 				ImGui::PopItemWidth();
 				ImGui::PopID();
 			}
 
-			if (ImGui::Button("Add"))
+			if (input_decl.inputs_count < lengthOf(input_decl.inputs) && ImGui::Button("Add"))
 			{
-				auto& input = input_decl.inputs[input_decl.inputs_count];
-				input.name[0] = 0;
-				input.type = Anim::InputDecl::BOOL;
-				input.offset = input_decl.getSize();
-				++input_decl.inputs_count;
+				for (auto& input : input_decl.inputs)
+				{
+					if (input.type == Anim::InputDecl::EMPTY)
+					{
+						input.name[0] = 0;
+						input.type = Anim::InputDecl::BOOL;
+						input.offset = input_decl.getSize();
+						++input_decl.inputs_count;
+						break;
+					}
+				}
 			}
 		}
 
@@ -404,10 +691,10 @@ void AnimationEditor::constantsGUI()
 
 	Anim::InputDecl& input_decl = m_resource->getEngineResource()->m_input_decl;
 	ImGui::PushID("consts");
-	for (int i = 0; i < input_decl.constants_count; ++i)
+	for (auto& constant : input_decl.constants)
 	{
-		ImGui::PushID(i);
-		auto& constant = input_decl.constants[i];
+		if (constant.type == Anim::InputDecl::EMPTY) continue;
+		ImGui::PushID(&constant);
 		ImGui::PushItemWidth(100);
 		ImGui::InputText("", constant.name, lengthOf(constant.name));
 		ImGui::SameLine();
@@ -426,25 +713,27 @@ void AnimationEditor::constantsGUI()
 		ImGui::SameLine();
 		if (ImGui::Button("x"))
 		{
-			for (int j = i; j < input_decl.constants_count - 1; ++j)
-			{
-				input_decl.constants[j] = input_decl.constants[j + 1];
-			}
+			constant.type = Anim::InputDecl::EMPTY;
 			--input_decl.constants_count;
-			--i;
 		}
 		ImGui::PopItemWidth();
 		ImGui::PopID();
 	}
 	ImGui::PopID();
 
-	if (ImGui::Button("Add##add_const"))
+	if (input_decl.constants_count < lengthOf(input_decl.constants) && ImGui::Button("Add##add_const"))
 	{
-		auto& constant = input_decl.constants[input_decl.constants_count];
-		constant.name[0] = 0;
-		constant.type = Anim::InputDecl::BOOL;
-		constant.b_value = true;
-		++input_decl.constants_count;
+		for (auto& constant : input_decl.constants)
+		{
+			if (constant.type == Anim::InputDecl::EMPTY)
+			{
+				constant.name[0] = 0;
+				constant.type = Anim::InputDecl::BOOL;
+				constant.b_value = true;
+				++input_decl.constants_count;
+				break;
+			}
+		}
 	}
 }
 

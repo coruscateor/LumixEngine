@@ -91,6 +91,7 @@ public:
 	Matrix getPositionAndRotation(Entity entity) const;
 	Matrix getMatrix(Entity entity) const;
 	void setTransform(Entity entity, const Transform& transform);
+	void setTransformKeepChildren(Entity entity, const Transform& transform, float scale);
 	void setTransform(Entity entity, const Transform& transform, float scale);
 	void setTransform(Entity entity, const Vec3& pos, const Quat& rot);
 	Transform getTransform(Entity entity) const;
@@ -99,11 +100,10 @@ public:
 	void setPosition(Entity entity, float x, float y, float z);
 	void setPosition(Entity entity, const Vec3& pos);
 	void setScale(Entity entity, float scale);
-	void instantiatePrefab(const PrefabResource& prefab,
+	Entity instantiatePrefab(const PrefabResource& prefab,
 		const Vec3& pos,
 		const Quat& rot,
-		float scale,
-		Array<Entity>& entities);
+		float scale);
 	float getScale(Entity entity);
 	const Vec3& getPosition(Entity entity) const;
 	const Quat& getRotation(Entity entity) const;

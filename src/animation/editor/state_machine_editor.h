@@ -50,6 +50,7 @@ public:
 	Container* getParent() { return m_parent; }
 	virtual void compile() {}
 	virtual void debug(ImDrawList* draw, const ImVec2& canvas_screen_pos, Lumix::Anim::ComponentInstance* runtime) {}
+	virtual Component* getByUID(int uid) { return engine_cmp && uid == engine_cmp->uid ? this : nullptr; }
 	virtual void debugInside(ImDrawList* draw,
 		const ImVec2& canvas_screen_pos,
 		Lumix::Anim::ComponentInstance* runtime,
@@ -107,11 +108,14 @@ public:
 	void deserialize(Lumix::InputBlob& blob) override;
 	void serialize(Lumix::OutputBlob& blob) override;
 	void compile() override;
-
+	virtual Component* getByUID(int uid) override;
 	virtual void dropSlot(const char* name, Lumix::u32 slot, const ImVec2& canvas_screen_pos) {}
 	virtual void removeChild(Component* component);
 	bool isContainer() const override { return true; }
-	
+	void createEdge(int from_uid, int to_uid, int edge_uid);
+	void destroyChild(int child_uid);
+	virtual void createNode(Lumix::Anim::Node::Type type, int uid, const ImVec2& pos) = 0;
+
 protected:
 	Lumix::Array<Component*> m_editor_cmps;
 	Component* m_selected_component;
@@ -186,7 +190,7 @@ public:
 		Container* current) override;
 
 private:
-	void createState(Lumix::Anim::Component::Type type, const ImVec2& pos);
+	void createNode(Lumix::Anim::Component::Type type, int uid, const ImVec2& pos) override;
 	RootEdge* createRootEdge(Node* node);
 
 private:
@@ -233,7 +237,7 @@ public:
 	void dropSlot(const char* name, Lumix::u32 slot, const ImVec2& canvas_screen_pos) override;
 
 private:
-	void createState(Lumix::Anim::Component::Type type, const ImVec2& pos);
+	void createNode(Lumix::Anim::Component::Type type, int uid, const ImVec2& pos) override;
 	EntryEdge* createEntryEdge(Node* node);
 
 private:
@@ -254,8 +258,7 @@ private:
 class ControllerResource
 {
 public:
-	ControllerResource(Lumix::AnimationSystem& anim_system,
-		IAnimationEditor& editor,
+	ControllerResource(IAnimationEditor& editor,
 		Lumix::ResourceManagerBase& manager,
 		Lumix::IAllocator& allocator);
 	~ControllerResource();
@@ -270,7 +273,7 @@ public:
 	int createUID() { ++m_last_uid; return m_last_uid; }
 	const char* getAnimationSlot(Lumix::u32 slot_hash) const;
 	void createAnimSlot(const char* name, const char* path);
-	Lumix::AnimationSystem& getAnimationSystem() { return m_animation_system; }
+	Component* getByUID(int uid);
 
 private:
 	int m_last_uid = 0;
@@ -279,7 +282,6 @@ private:
 	Component* m_root;
 	Lumix::Anim::ControllerResource* m_engine_resource;
 	Lumix::Array<Lumix::string> m_animation_slots;
-	Lumix::AnimationSystem& m_animation_system;
 };
 
 

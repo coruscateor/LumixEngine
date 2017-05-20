@@ -152,6 +152,40 @@ Matrix Universe::getPositionAndRotation(Entity entity) const
 }
 
 
+void Universe::setTransformKeepChildren(Entity entity, const Transform& transform, float scale)
+{
+	auto& tmp = m_entities[entity.index];
+	tmp.position = transform.pos;
+	tmp.rotation = transform.rot;
+	tmp.scale = scale;
+	
+	int hierarchy_idx = m_entities[entity.index].hierarchy;
+	entityTransformed().invoke(entity);
+	if (hierarchy_idx >= 0)
+	{
+		Hierarchy& h = m_hierarchy[hierarchy_idx];
+		Transform my_transform = getTransform(entity);
+		if (isValid(h.parent))
+		{
+			Transform parent_tr = getTransform(h.parent);
+			h.local_transform = parent_tr.inverted() * my_transform;
+			h.local_scale = getScale(h.parent) * getScale(entity);
+		}
+
+		Entity child = h.first_child;
+		while (isValid(child))
+		{
+			Hierarchy& child_h = m_hierarchy[m_entities[child.index].hierarchy];
+
+			child_h.local_transform = my_transform.inverted() * getTransform(child);
+			child_h.local_scale = scale * getScale(child);
+			child = child_h.next_sibling;
+		}
+	}
+
+}
+
+
 void Universe::setTransform(Entity entity, const Transform& transform)
 {
 	auto& tmp = m_entities[entity.index];
@@ -452,7 +486,7 @@ void Universe::setParent(Entity new_parent, Entity child)
 					*x = getNextSibling(child);
 					break;
 				}
-				x = &m_hierarchy[x->index].next_sibling;
+				x = &m_hierarchy[m_entities[x->index].hierarchy].next_sibling;
 			}
 			m_hierarchy[child_idx].parent = INVALID_ENTITY;
 			m_hierarchy[child_idx].next_sibling = INVALID_ENTITY;
@@ -637,14 +671,13 @@ struct PrefabEntityGUIDMap : public ILoadEntityGUIDMap
 };
 
 
-void Universe::instantiatePrefab(const PrefabResource& prefab,
+Entity Universe::instantiatePrefab(const PrefabResource& prefab,
 	const Vec3& pos,
 	const Quat& rot,
-	float scale,
-	Array<Entity>& entities)
+	float scale)
 {
-	ASSERT(entities.empty());
 	InputBlob blob(prefab.blob.getData(), prefab.blob.getPos());
+	Array<Entity> entities(m_allocator);
 	PrefabEntityGUIDMap entity_map(entities);
 	TextDeserializer deserializer(blob, entity_map);
 	u32 version;
@@ -652,7 +685,7 @@ void Universe::instantiatePrefab(const PrefabResource& prefab,
 	if (version > (int)PrefabVersion::LAST)
 	{
 		g_log_error.log("Engine") << "Prefab " << prefab.getPath() << " has unsupported version.";
-		return;
+		return INVALID_ENTITY;
 	}
 	int count;
 	deserializer.read(&count);
@@ -696,6 +729,7 @@ void Universe::instantiatePrefab(const PrefabResource& prefab,
 		}
 		++entity_idx;
 	}
+	return entities[0];
 }
 
 
